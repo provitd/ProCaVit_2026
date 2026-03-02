@@ -1,0 +1,603 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+
+```{r}
+library(msigdbr)
+library(readxl)
+library(tidyverse)
+library(ReactomePA)
+library(ComplexHeatmap)
+library(clusterProfiler)
+library(circlize)
+library(org.Hs.eg.db)
+library(org.Mm.eg.db)
+library(dplyr)
+library(DESeq2)
+library(VennDiagram)
+library(ggrepel)
+library(EnhancedVolcano)
+library(DOSE)
+library(fgsea)
+library(pheatmap)
+library(biomaRt)
+setwd("~/Desktop/These/PTEN:VDR/22180")
+Term2Gene <-  msigdbr(species = "Mus musculus")
+m_df = msigdbr(species = "mouse", category = "H")
+m_t2g = m_df %>% dplyr::select(gs_name, entrez_gene) %>% as.data.frame()
+write_tsv((x = m_t2g), file = "m_t2g.tsv")
+
+```
+
+```{r}
+#PTEN 1 and 3 month analysis 
+
+tableS22180 = read_excel(path = "~/Desktop/These/PTEN:VDR/22180/PTEN1 PTEN3/F22180_PTEN1 PTEN3.xls")
+metadata <- data.frame(id=colnames(tableS22180)[2:7], cond=c(rep('PTEN_1m',3), rep('PTEN_3m', 3)))
+rownames(tableS22180) = tableS22180$`Ensembl Gene ID`
+count<-tableS22180[,1:7] 
+metadata <- subset(metadata, id %in% colnames(count))
+rowname<- count$`Ensembl Gene ID`
+count <- count[,-1]
+rownames(count) = rowname
+dds <- DESeqDataSetFromMatrix(countData=count,colData=metadata,design=~cond)
+
+
+dds <- DESeq(dds, minReplicatesForReplace=Inf)
+
+res.P1.P3 <- results(dds,  alpha=0.05, cooksCutoff=T, independentFiltering=T, contrast=c("cond","PTEN_1m","PTEN_3m"))
+
+
+vsdata <- vst(dds, blind=T)
+vsdata <- rlog(dds, blind=T)
+x <- plotPCA(vsdata, intgroup=c("cond", "id"))
+pcaData <- plotPCA(vsdata, intgroup=c("cond", "id"), returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color=cond, label = id)) + geom_point() + geom_text() 
+
+res.P1.P3$Gene_name <- rownames(res.P1.P3)
+x = as.data.frame(res.P1.P3)
+write_tsv(x = as.data.frame(res.P1.P3), file = "res.P1.P3.tsv")
+
+```
+
+```{r}
+#P1P3 analysis
+
+x= as.data.frame(res.P1.P3)
+x$Gene_name <- rownames(x)
+
+res.P1.P3 = read_tsv(file = "~/Desktop/These/PTEN:VDR/22180/res.P1.P3.tsv")
+
+NCBI_id <- mapIds(org.Mm.eg.db, res.P1.P3$Gene_name, 'SYMBOL', 'ENSEMBL')
+res.P1.P3 <- add_column(.data = res.P1.P3, NCBI=NCBI_id, .before  = 'Gene_name')
+res.P1.P3 <- res.P1.P3 %>% distinct(NCBI, .keep_all = T)
+
+write_tsv(x = as.data.frame(res.P1.P3), file = "NCBI_res.P1.P3.tsv")
+
+```
+
+
+
+```{r}
+#PTENVDR 1 vs PTEN 1 month analysis 
+
+tableS22180 = read_excel(path = "~/Desktop/These/PTEN:VDR/22180/VDR1 PTEN1 copie/F22180_PTEN1 VDR1.xls")
+metadata <- data.frame(id=colnames(tableS22180)[2:7], cond=c(rep('VDR_1m',3), rep('PTEN_1m', 3)))
+rownames(tableS22180) = tableS22180$`Ensembl Gene ID`
+count<-tableS22180[,1:7] 
+metadata <- subset(metadata, id %in% colnames(count))
+rowname<- count$`Ensembl Gene ID`
+count <- count[,-1]
+rownames(count) = rowname
+dds <- DESeqDataSetFromMatrix(countData=count,colData=metadata,design=~cond)
+
+
+dds <- DESeq(dds, minReplicatesForReplace=Inf)
+
+res.V1.P1 <- results(dds, alpha=0.05, cooksCutoff=T, independentFiltering=T, contrast=c("cond","VDR_1m","PTEN_1m"))
+
+vsdata <- vst(dds, blind=T)
+vsdata <- rlog(dds, blind=T)
+x <- plotPCA(vsdata, intgroup=c("cond", "id"))
+pcaData <- plotPCA(vsdata, intgroup=c("cond", "id"), returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color=cond, label = id)) + geom_point() + geom_text() 
+
+res.V1.P1$Gene_name <- rownames(res.V1.P1)
+x = as.data.frame(res.V1.P1)
+write_tsv(x = as.data.frame(res.V1.P1), file = "res.V1.P1.tsv")
+
+```
+
+```{r}
+#V1P1 analysis
+
+x= as.data.frame(res.V1.P1)
+x$Gene_name <- rownames(x)
+
+res.V1.P1 = read_tsv(file = "~/Desktop/These/PTEN:VDR/22180/res.V1.P1.tsv")
+
+NCBI_id <- mapIds(org.Mm.eg.db, res.V1.P1$Gene_name, 'SYMBOL', 'ENSEMBL')
+res.V1.P1 <- add_column(.data = res.V1.P1, NCBI=NCBI_id, .before  = 'Gene_name')
+res.V1.P1 <- res.V1.P1 %>% distinct(NCBI, .keep_all = T)
+
+write_tsv(x = as.data.frame(res.V1.P1), file = "NCBI_res.P1.V1.tsv")
+
+# VolcanoPlot
+
+EnhancedVolcano(res.V1.P1,lab = res.V1.P1$NCBI,x = 'log2FoldChange', y = 'pvalue', FCcutoff = 0.5, pCutoff = 0.05, pointSize = 0.5, xlim = c(-1,2), ylim =c(1, 5), title = 'PtenVdr vs Pten', legendLabSize = 16,selectLab = c("Ndufb8","Uqcrq", "Sdhb","Sdhd", "Gstm6", "Mgst2", "Cdkn1a", "Akt1", "Pik3ca", "Gsta4","Sos2", "Gpx5", "Atp6v1b1"), legendIconSize = 4.0, boxedLabels = TRUE, drawConnectors = TRUE, widthConnectors = 1.0,colConnectors = 'black', col = c('slategrey', 'slategrey', 'slategrey', 'royalblue'), colAlpha = 4/5)
+ggsave(filename = 'Volcanotest.pdf',dpi = 300, width = 4.5, height = 5)
+#selectLab = c("Ndufb8", "Sdhb","Sdbd", "Atp6v1e1", "Mgst3", "Gstt2", "Cdkn1a", "Akt1", "Pik3ca")
+```
+
+```{r}
+#VDR 1 and 3 month analysis 
+
+tableS22180 = read_excel(path = "~/Desktop/These/PTEN:VDR/22180/VDR 1 VDR3/F22180_VDR1 VDR3 copie.xls")
+metadata <- data.frame(id=colnames(tableS22180)[2:7], cond=c(rep('VDR_1m',3), rep('VDR_3m', 3)))
+rownames(tableS22180) = tableS22180$`Ensembl Gene ID`
+count<-tableS22180[,1:7]
+metadata <- subset(metadata, id %in% colnames(count))
+rowname<- count$`Ensembl Gene ID`
+count <- count[,-1]
+rownames(count) = rowname
+dds <- DESeqDataSetFromMatrix(countData=count,colData=metadata,design=~cond)
+
+
+dds <- DESeq(dds, minReplicatesForReplace=Inf)
+
+res.V1.V3 <- results(dds, alpha=0.05, cooksCutoff=T, independentFiltering=T, contrast=c("cond","VDR_1m","VDR_3m"))
+
+vsdata <- vst(dds, blind=T)
+vsdata <- rlog(dds, blind=T)
+x <- plotPCA(vsdata, intgroup=c("cond", "id"))
+pcaData <- plotPCA(vsdata, intgroup=c("cond", "id"), returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color=cond, label = id)) + geom_point() + geom_text() 
+
+res.V1.V3$Gene_name <- rownames(res.V1.V3)
+x = as.data.frame(res.V1.V3)
+write_tsv(x = as.data.frame(res.V1.V3), file = "res.V1.V3.tsv")
+
+```
+
+
+```{r}
+#V1V3 analysis
+
+x= as.data.frame(res.V1.V3)
+x$Gene_name <- rownames(x)
+
+res.V1.V3 = read_tsv(file = "~/Desktop/These/PTEN:VDR/22180/res.V1.V3.tsv")
+
+NCBI_id <- mapIds(org.Mm.eg.db, res.V1.V3$Gene_name, 'SYMBOL', 'ENSEMBL')
+res.V1.V3 <- add_column(.data = res.V1.V3, NCBI=NCBI_id, .before  = 'Gene_name')
+res.V1.V3 <- res.V1.V3 %>% distinct(NCBI, .keep_all = T)
+
+write_tsv(x = as.data.frame(res.V1.V3), file = "NCBI_res.V1.V3.tsv")
+
+```
+```{r}
+#PTENVDR vs PTEN 3 month analysis 
+
+tableS22180 = read_excel(path = "~/Desktop/These/PTEN:VDR/22180/VDR3 PTEN3 copie 2/F22180_PTEN3 VDR3.xls")
+metadata <- data.frame(id=colnames(tableS22180)[2:7], cond=c(rep("VDR_3m",3), rep('PTEN_3m', 3)))
+rownames(tableS22180) = tableS22180$`Ensembl Gene ID`
+count<-tableS22180[,1:7]
+metadata <- subset(metadata, id %in% colnames(count))
+rowname<- count$`Ensembl Gene ID`
+count <- count[,-1]
+rownames(count) = rowname
+dds <- DESeqDataSetFromMatrix(countData=count,colData=metadata,design=~cond)
+
+
+dds <- DESeq(dds, minReplicatesForReplace=Inf)
+
+res.V3.P3 <- results(dds,  alpha=0.05, cooksCutoff=T, independentFiltering=T, contrast=c("cond","VDR_3m","PTEN_3m"))
+
+
+vsdata <- vst(dds, blind=T)
+vsdata <- rlog(dds, blind=T)
+x <- plotPCA(vsdata, intgroup=c("cond", "id"))
+pcaData <- plotPCA(vsdata, intgroup=c("cond", "id"), returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color=cond, label = id)) + geom_point() + geom_text() 
+
+
+res.V3.P3$Gene_name <- rownames(res.V3.P3)
+x = as.data.frame(res.V3.P3)
+write_tsv(x = as.data.frame(res.V3.P3), file = "res.V3.P3.tsv")
+
+
+```
+
+```{r}
+#V3P3 analysis
+
+x= as.data.frame(res.V3.P3)
+x$Gene_name <- rownames(x)
+
+res.V3.P3 = read_tsv(file = "~/Desktop/These/PTEN:VDR/22180/res.V3.P3.tsv")
+
+NCBI_id <- mapIds(org.Mm.eg.db, res.V3.P3$Gene_name, 'SYMBOL', 'ENSEMBL')
+res.V3.P3 <- add_column(.data = res.V3.P3, NCBI=NCBI_id, .before  = 'Gene_name')
+res.V3.P3 <- res.V3.P3 %>% distinct(NCBI, .keep_all = T)
+
+write_tsv(x = as.data.frame(res.V3.P3), file = "NCBI_res.V3.P3.tsv")
+
+EnhancedVolcano(res.V3.P3,lab = res.V3.P3$NCBI,x = 'log2FoldChange', y = 'pvalue', FCcutoff = 0.5, pCutoff = 0.05, pointSize = 0.5, xlim = c(0,2), ylim =c(1, 8), title = 'PtenVdr vs Pten', legendLabSize = 16, legendIconSize = 5.0, selectLab = c("Gstm4", "Gsta2", "Sos2", "Cxcl3", "Cxcl5", "Rel", "Mgst2"), boxedLabels = TRUE, drawConnectors = TRUE, widthConnectors = 1.0,colConnectors = 'black', col = c('gray', 'gray', 'gray', 'mediumpurple4'), colAlpha = 4/5)
+ggsave(filename = 'Volcanotest2.pdf',dpi = 300, width = 5, height = 5)
+#selectLab = c("Gstm4", "Gsta2","Sdhb", "Sos2", "Cxcl3", "Cxcl5", "Rel")
+
+```
+
+
+```{r}
+# Pathways
+res.V1.P1 = read_tsv(file = "res.V1.P1.tsv")
+test_up <- filter(res.V1.P1, (res.V1.P1$pvalue <0.05& abs(as.numeric(res.V1.P1$log2FoldChange))>0.3))
+NCBI_id <- mapIds(org.Mm.eg.db, test_up$Gene_name, 'ENTREZID', 'ENSEMBL')
+test_up <- add_column(.data = test_up, NCBI=NCBI_id, .before  = 'Gene_name')
+test_up <- test_up %>% distinct(NCBI, .keep_all = T)
+# Create a vector of the FC 
+test_up <- test_up %>% drop_na(NCBI)
+file <- test_up$'log2FoldChange'
+# Name vector with ENTREZ ids
+names(file) <- test_up$NCBI
+
+# sort the list in decreasing order (required for clusterProfiler)
+file = sort(file, decreasing = TRUE)
+file_h=file
+
+nom = "res.V1.P1"
+
+
+gse= gseKEGG(
+  geneList = file_h,
+  organism = "mmu",
+  keyType = "kegg",
+  exponent = 0,
+ minGSSize = 10,
+ maxGSSize = 500,
+ eps = 0,
+  pvalueCutoff = 0.1,
+ pAdjustMethod = "BH",
+  by = "fgsea",
+ nPermSimple = 10000) 
+
+gse <- setReadable(gse, org.Mm.eg.db, keyType = "ENTREZID")
+if (dim(gse)[1]!=0) {
+gse@result$Path='KEGG'
+gse@result$orig=nom  
+}
+name <- paste0(nom, "_KEGG.csv")
+gse3=gse
+write.csv(gse@result,  file=name, row.names=T) 
+
+gse=gseDO(
+  geneList=file_h,
+  exponent = 1,
+  minGSSize = 10,
+  maxGSSize = 500,
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH",
+  verbose = TRUE,
+  seed = FALSE,
+  by = "fgsea",
+  nPermSimple = 10000,
+  eps=0
+)
+
+gse <- setReadable(gse, org.Mm.eg.db, keyType = "ENTREZID")
+if (dim(gse)[1]!=0) {
+gse@result$Path='DO'
+gse@result$orig=nom
+}
+name <- paste0(nom, "_DO.csv")
+gse4=gse
+write.csv(gse@result,  file=name, row.names=T) 
+
+gse=gseDGN(
+  geneList=file_h,
+  exponent = 1,
+  minGSSize = 10,
+  maxGSSize = 500,
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH",
+  verbose = TRUE,
+  seed = FALSE,
+  by = "fgsea",
+  nPermSimple = 10000,
+  eps=0
+)
+
+
+gse <- setReadable(gse, org.Mm.eg.db, keyType = "ENTREZID")
+if (dim(gse)[1]!=0) {
+gse@result$Path='DGN'
+gse@result$orig=nom  
+}
+name <- paste0(nom, "_DGN.csv")
+gse5=gse
+write.csv(gse@result,  file=name, row.names=T) 
+
+# m_t2g2 
+#m_t2g2 = read_tsv(file = "m_t2g2.txt")
+
+gse=GSEA(
+  geneList=file,
+  exponent = 1,
+  minGSSize = 10,
+  maxGSSize = 500,
+  eps = 0,
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH",
+  TERM2GENE=m_t2g,
+  TERM2NAME = NA,
+  verbose = TRUE,
+  seed = FALSE,
+  by = "fgsea",
+)
+
+gse <- setReadable(gse, org.Mm.eg.db, keyType = "ENTREZID")
+if (dim(gse)[1]!=0) {
+gse@result$Path='GSEA'
+gse@result$orig=nom  
+}
+name <- paste0(nom, "_Hallmarck.csv")
+gse6=gse
+write.csv(gse@result,  file=name, row.names=T)
+
+```
+
+```{r}
+set1 =as.data.frame(res.P1.P3) %>% filter(pvalue < 0.05) %>% rownames_to_column()
+
+HMap_table <- data.frame(Gene=tableS22180$`Ensembl Gene ID`, tableS22180[2:12])
+
+Heatmap<-HMap_table %>% filter(Gene %in% set1$Gene_name)
+
+
+# Heatmap Katya 
+
+ensembl = useMart("ensembl", dataset ="mmusculus_gene_ensembl")
+
+gene_ids <- res.P1.P3$Gene_name
+                  
+row <- getBM(attributes=c("ensembl_gene_id", "mgi_symbol"), 
+                      filters = "ensembl_gene_id", values = Heatmap$Gene, 
+                      mart = ensembl)
+
+Hmap2 <- Heatmap[2:12]
+#Hmap2 = Hmap2 %>% dplyr::select(!contains(c("76")))
+
+colnames(Hmap2) <- c("PTEN1_1", "PTEN1_2", "PTEN1_3", "PTEN1_4", "PTEN1_5", "PTEN3_1", "PTEN3_2", "PTEN3_3", "PTEN3_4", "PTEN3_5")
+
+Hmapsave <- pheatmap(Hmap2, scale = "row", clustering_method = "complete", fontsize = 8, show_rownames = F, border_color = "black", color = colorRampPalette(c("dark orange", "white", "blue"))(100))
+
+
+save_pheatmap_pdf <- function(x, filename, width=3, height=5) {
+   stopifnot(!missing(x))
+   stopifnot(!missing(filename))
+   pdf(filename, width=width, height=height)
+   grid::grid.newpage()
+   grid::grid.draw(x$gtable)
+   dev.off()
+}
+save_pheatmap_pdf(Hmapsave, "test.pdf")
+```
+
+
+```{r}
+
+set1=data.frame(as.data.frame(res.P1.V1), Gene=rownames(as.data.frame(res.P1.V1)))
+set1 <- as.data.frame(set1) %>% filter(pvalue < 0.05)
+set1=set1$Gene
+
+set4=data.frame(as.data.frame(res.P3.V3), Gene=rownames(as.data.frame(res.P3.V3)))
+set4 <- as.data.frame(set4) %>% filter(pvalue < 0.05)
+set4=set4$Gene
+
+set6=data.frame(as.data.frame(res.P3.V3), Gene=rownames(as.data.frame(res.P3.V3)))
+set6 <- as.data.frame(set6) %>% filter(pvalue < 0.05)
+set6=set6$Gene
+
+venn.diagram(
+x = list(set1,set4),
+category.names = c("P1vsV1", "P3vsV3"),
+filename = 'Venn1.png',
+output = TRUE,
+fill = c("cornflowerblue", "tan4"),
+cex = 2.5
+)
+t1<-calculate.overlap(list(set1, set4, set6))
+x1<-t1[-c(2,3,6,7)]
+```
+
+```{r}
+set2=data.frame(as.data.frame(res.P1.P3), Gene=rownames(as.data.frame(res.P1.P3)))
+set2 <- as.data.frame(set2) %>% filter(pvalue < 0.05)
+set2=set2$Gene
+
+set3 = data.frame(as.data.frame(res.V1.V3), Gene=rownames(as.data.frame(res.V1.V3)))
+set3 <- as.data.frame(set3) %>% filter(pvalue < 0.05)
+set3=set3$Gene
+
+set5=data.frame(as.data.frame(res.P1.P3), Gene=rownames(as.data.frame(res.P1.P3)))
+set5 <- as.data.frame(set5) %>% filter(pvalue < 0.05)
+set5=set5$Gene
+
+
+venn.diagram(
+x = list(set2, set3),
+category.names = c("P1vsP3", "V1vsV3"),
+filename = 'test.png',
+output = TRUE,
+fill = c("dark orange", "gray"),
+cex = 2.5
+)
+
+t2<-calculate.overlap(list(set2, set3, set5))
+x2<-t2[-c(2,4,5,7)]
+
+
+#Save the data frame as a tab-separated values (TSV) file
+write.table(t$a15, file = "DEGa15.tsv")
+```
+
+```{r}
+#genotype 
+
+tableF = read_excel(path = "~/Desktop/These/PTEN:VDR/22180/F22180_alldata13xls.xls")
+metadata <- data.frame(id=colnames(tableF)[2:13], cond=c(rep('PTEN_1m',3), rep('VDR_1m', 3), rep('PTEN_3m',3),rep('VDR_3m',3)))
+
+HMap_table <- data.frame(Gene=tableF$`Ensembl Gene ID`, tableF[14:25]/tableF$`Median of transcripts length`)
+names(x1) <- c( "common","P3.vs.V3","P1.vs.V1")
+
+
+Heatmap<-data.frame()
+
+for(i in 1:length(x1)) {
+    transit <- HMap_table %>% subset(Gene %in% x1[[i]])
+    if (dim(transit)[1] != 0) {
+    transit$'id' <- names(x1[i])
+    Heatmap<- bind_rows(Heatmap, transit)
+    }
+}
+
+Heatmap1 <- Heatmap[Heatmap$id == "common", ]
+Heatmap2 <- Heatmap[Heatmap$id == "P3.vs.V3", ]
+Heatmap3 <- Heatmap[Heatmap$id == "P1.vs.V1", ]
+
+row<-Heatmap1$Gene
+Hmap1 <- Heatmap1[2:13]
+rownames(Hmap1)=row
+map1=t(scale(t(Hmap1)))
+col_fun <- c("navyblue", "cornflowerblue", "grey90", "tan4", "orangered4") 
+
+column_ha = HeatmapAnnotation(cond = metadata$cond,
+    simple_anno_size = unit(0.2, "cm"))
+
+ht <- Heatmap(map1, show_row_dend = F, col=col_fun,show_column_dend = F, column_order = colnames(map), name = 'normalized reads', cluster_row_slices = T, row_dend_reorder = T, cluster_rows = T, row_names_gp = gpar(fontsize = 0), column_names_side = "top", column_names_gp =gpar(fontsize = 0), column_names_rot = 0, column_names_centered = T,top_annotation = column_ha, heatmap_legend_param = list(legend_direction = "vertical",legend_height = unit(2, "cm"), title_gp=gpar(fontsize = 8), labels_gp=gpar(fontsize = 8), title_position="leftcenter-rot", grid_width = unit(0.2, "cm")),width = unit(5, "cm"), height=unit(0.7, 'cm'), use_raster = T)
+
+tiff("Heatmap1common.tiff", width = 5, height = 5, res = 300, units = "in")
+
+draw(ht)
+dev.off()
+
+row<-Heatmap2$Gene
+Hmap2 <- Heatmap2[2:13]
+rownames(Hmap2)=row
+map2=t(scale(t(Hmap2)))
+col_fun <- c("navyblue", "cornflowerblue", "grey90", "tan4", "orangered4") 
+
+column_ha = HeatmapAnnotation(cond = metadata$cond,
+    simple_anno_size = unit(0.2, "cm"))
+
+ht <- Heatmap(map2, show_row_dend = F, col=col_fun,show_column_dend = F, column_order = colnames(map), name = 'normalized reads', cluster_row_slices = T, row_dend_reorder = T, cluster_rows = T, row_names_gp = gpar(fontsize = 0), column_names_side = "top", column_names_gp =gpar(fontsize = 0), column_names_rot = 0, column_names_centered = T,top_annotation = column_ha, heatmap_legend_param = list(legend_direction = "vertical",legend_height = unit(2, "cm"), title_gp=gpar(fontsize = 8), labels_gp=gpar(fontsize = 8), title_position="leftcenter-rot", grid_width = unit(0.2, "cm")),width = unit(5, "cm"), height=unit(2, 'cm'), use_raster = T)
+
+tiff("Heatmap1P3V3.tiff", width = 5, height = 5, res = 300, units = "in")
+
+draw(ht)
+dev.off()
+
+
+row<-Heatmap3$Gene
+Hmap3 <- Heatmap3[2:13]
+rownames(Hmap3)=row
+map3=t(scale(t(Hmap3)))
+col_fun <- c("navyblue", "cornflowerblue", "grey90", "tan4", "orangered4") 
+
+column_ha = HeatmapAnnotation(cond = metadata$cond,
+    simple_anno_size = unit(0.2, "cm"))
+
+ht <- Heatmap(map3, show_row_dend = F, col=col_fun,show_column_dend = F, column_order = colnames(map), name = 'normalized reads', cluster_row_slices = T, row_dend_reorder = T, cluster_rows = T, row_names_gp = gpar(fontsize = 0), column_names_side = "top", column_names_gp =gpar(fontsize = 0), column_names_rot = 0, column_names_centered = T,top_annotation = column_ha, heatmap_legend_param = list(legend_direction = "vertical",legend_height = unit(2, "cm"), title_gp=gpar(fontsize = 8), labels_gp=gpar(fontsize = 8), title_position="leftcenter-rot", grid_width = unit(0.2, "cm")),width = unit(5, "cm"), height=unit(4.3, 'cm'), use_raster = T)
+
+tiff("Heatmap1P1V1.tiff", width = 5, height = 5, res = 300, units = "in")
+
+draw(ht)
+dev.off()
+```
+
+
+```{r}
+#Supp 1m-3m evolution 
+#genotype 
+
+tableF = read_excel(path = "~/Desktop/These/PTEN:VDR/22180/F22180_alldata13xls.xls")
+metadata <- data.frame(id=colnames(tableF)[2:13], cond=c(rep('PTEN_1m',3), rep('VDR_1m', 3), rep('PTEN_3m',3),rep('VDR_3m',3)))
+
+HMap_table <- data.frame(Gene=tableF$`Ensembl Gene ID`, tableF[14:25]/tableF$`Median of transcripts length`)
+names(x2) <- c( "common","P1.vs.P3","V1.vs.V3")
+
+
+Heatmapx<-data.frame()
+
+for(i in 1:length(x2)) {
+    transit <- HMap_table %>% subset(Gene %in% x2[[i]])
+    if (dim(transit)[1] != 0) {
+    transit$'id' <- names(x2[i])
+    Heatmapx<- bind_rows(Heatmapx, transit)
+    }
+}
+
+Heatmap1 <- Heatmap[Heatmap$id == "common", ]
+Heatmap2 <- Heatmap[Heatmap$id == "P1.vs.P3", ]
+Heatmap3 <- Heatmap[Heatmap$id == "V1.vs.V3", ]
+
+row<-Heatmap11$Gene
+Hmap11 <- Heatmap11[2:13]
+rownames(Hmap11)=row
+map11=t(scale(t(Hmap11)))
+col_fun <- c("navyblue", "cornflowerblue", "grey90", "tan4", "orangered4") 
+
+column_ha = HeatmapAnnotation(cond = metadata$cond,
+    simple_anno_size = unit(0.2, "cm"))
+
+ht <- Heatmap(map11, show_row_dend = F, col=col_fun,show_column_dend = F, column_order = colnames(map), name = 'normalized reads', cluster_row_slices = T, row_dend_reorder = T, cluster_rows = T, row_names_gp = gpar(fontsize = 0), column_names_side = "top", column_names_gp =gpar(fontsize = 0), column_names_rot = 0, column_names_centered = T,top_annotation = column_ha, heatmap_legend_param = list(legend_direction = "vertical",legend_height = unit(2, "cm"), title_gp=gpar(fontsize = 8), labels_gp=gpar(fontsize = 8), title_position="leftcenter-rot", grid_width = unit(0.2, "cm")),width = unit(5, "cm"), height=unit(2.2, 'cm'), use_raster = T)
+
+tiff("Heatmap2common.tiff", width = 5, height = 5, res = 300, units = "in")
+
+draw(ht)
+dev.off()
+
+row<-Heatmap12$Gene
+Hmap12 <- Heatmap12[2:13]
+rownames(Hmap12)=row
+map12=t(scale(t(Hmap12)))
+col_fun <- c("navyblue", "cornflowerblue", "grey90", "tan4", "orangered4") 
+
+column_ha = HeatmapAnnotation(cond = metadata$cond,
+    simple_anno_size = unit(0.2, "cm"))
+
+ht <- Heatmap(map12, show_row_dend = F, col=col_fun,show_column_dend = F, column_order = colnames(map), name = 'normalized reads', cluster_row_slices = T, row_dend_reorder = T, cluster_rows = T, row_names_gp = gpar(fontsize = 0), column_names_side = "top", column_names_gp =gpar(fontsize = 0), column_names_rot = 0, column_names_centered = T,top_annotation = column_ha, heatmap_legend_param = list(legend_direction = "vertical",legend_height = unit(2, "cm"), title_gp=gpar(fontsize = 8), labels_gp=gpar(fontsize = 8), title_position="leftcenter-rot", grid_width = unit(0.2, "cm")),width = unit(5, "cm"), height=unit(2.9, 'cm'), use_raster = T)
+
+tiff("Heatmap2P1P3.tiff", width = 5, height = 5, res = 300, units = "in")
+
+draw(ht)
+dev.off()
+
+
+row<-Heatmap13$Gene
+Hmap13 <- Heatmap13[2:13]
+rownames(Hmap13)=row
+map13=t(scale(t(Hmap13)))
+col_fun <- c("navyblue", "cornflowerblue", "grey90", "tan4", "orangered4") 
+
+column_ha = HeatmapAnnotation(cond = metadata$cond,
+    simple_anno_size = unit(0.2, "cm"))
+
+ht <- Heatmap(map13, show_row_dend = F, col=col_fun,show_column_dend = F, column_order = colnames(map), name = 'normalized reads', cluster_row_slices = T, row_dend_reorder = T, cluster_rows = T, row_names_gp = gpar(fontsize = 0), column_names_side = "top", column_names_gp =gpar(fontsize = 0), column_names_rot = 0, column_names_centered = T,top_annotation = column_ha, heatmap_legend_param = list(legend_direction = "vertical",legend_height = unit(2, "cm"), title_gp=gpar(fontsize = 8), labels_gp=gpar(fontsize = 8), title_position="leftcenter-rot", grid_width = unit(0.2, "cm")),width = unit(5, "cm"), height=unit(1.9, 'cm'), use_raster = T)
+
+tiff("Heatmap2V1V3.tiff", width = 5, height = 5, res = 300, units = "in")
+
+draw(ht)
+dev.off()
+```
