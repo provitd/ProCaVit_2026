@@ -1,0 +1,374 @@
+---
+title: "scRNA paper tables and figures"
+format: html
+---
+
+# Introduction to the datasets
+
+Two scRNA-seq samples are being analysed:
+
+- Pten 
+- Vdr
+
+
+```{r}
+library(Seurat)
+library(here)
+library(dplyr)
+library(tibble)
+library(glue)
+library(here)
+library(ggplot2)
+
+dir.create(here("results/paper/scRNA/"))
+```
+
+# Pre-processing and integration
+
+```{r preprocessing}
+dataset <- list("Pten" = list(sample = "Pten", 
+                              dir = here("data/S19192/MNGC194/filtered_feature_bc_matrix/")),
+                  "Vdr" = list(sample = "Vdr", 
+                               dir = here("data/S19192/MNGC195/filtered_feature_bc_matrix/")))
+
+seurat.list <- lapply(dataset, function(x){
+  mtx <- Read10X(data.dir = here(x$dir))
+  seurat <- CreateSeuratObject(mtx,
+                          project = x$sample,
+                          assay = "RNA",
+                          min.cells = 10,
+                          min.features = 100,
+                          names.field = 1,
+                          names.delim = "_",
+                          meta.data = NULL
+    )
+  seurat[["percent.mt"]] <- PercentageFeatureSet(seurat, pattern = "^mt-")
+  return(seurat)
+  }
+)
+
+VlnPlot(seurat.list$Pten, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), 
+        pt.size=0, 
+        ncol = 3)
+VlnPlot(seurat.list$Vdr, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), 
+        pt.size=0, 
+        ncol = 3)
+
+# Creation of the combined Seurat object 
+seurat.list <- lapply(seurat.list, FUN = function(x) {
+    x <- subset(x, subset = nFeature_RNA > 100 & nFeature_RNA < 5000 & percent.mt < 20)
+    x <- NormalizeData(x)
+    x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+seurat <- FindIntegrationAnchors(object.list = seurat.list, dims = 1:30)
+seurat <- IntegrateData(anchorset = seurat, dims = 1:30)
+
+seurat <- ScaleData(seurat, verbose = FALSE)
+seurat <- RunPCA(seurat, npcs = 10, verbose = FALSE)
+
+seurat <- FindNeighbors(seurat, reduction = "pca", dims = 1:10)
+seurat <- FindClusters(seurat, resolution = 0.8)
+seurat <- RunTSNE(seurat, dims.use = 1:10, reduction.use = "pca", perplexity = 30)
+
+seurat[["RNA"]] <- JoinLayers(seurat[["RNA"]])
+```
+
+# Annotation 
+
+```{r annotation}
+# Add annotation
+cell_annotation <- read.csv(here("data/cell_annotation.csv")) %>% column_to_rownames("X")
+seurat <- AddMetaData(seurat, metadata = cell_annotation, col.name = "CellType") 
+
+# Remove SVE cells 
+seurat <- subset(seurat, cells = WhichCells(seurat, expression = CellType %in% c("SVE")), invert = T)
+# CellType as factor
+seurat$CellType <- factor(seurat$CellType)
+seurat$CellType <- ordered(seurat$CellType, levels = c("Luminal A", "Luminal C", "Basal", "Neutrophil", "Stromal", "T-cells", "Macrophage", "Endothelial", "B-cells"))
+Idents(seurat) <- seurat$CellType 
+```
+
+```{r figure-tsne}
+cols <- c(Stromal = "#E8776D", Neutrophil = "#D39200", Macrophage = "#93AA00", 
+          `T-cells` = "#00BA38", `Luminal C` = "#00C19F", `B-cells` = "#00B9E3", 
+          Endothelial = "#619CFF", `Luminal A` = "#DB72FB", Basal = "#FF61C3"
+)
+
+TSNEPlot(seurat, split.by = "orig.ident", cols = cols)
+
+
+ggsave(filename = here("results/paper/scRNA/tsne_Luminal_A_C.png"), 
+       plot = last_plot(), 
+       width = 8, height = 5,
+       bg = "white")
+
+
+```
+
+```{r figure-dotplot}
+annotation <- c("Krt8", "Tacstd2", "Krt5", "S100a8", "Col1a1", "Cd3e", "Adgre1", "Pecam1", "Cd79a")
+
+DotPlot(seurat, features = annotation, 
+        cols = c("#f1e3c3", "#0D15F2")) + 
+  RotatedAxis()
+
+ggsave(filename = here("results/paper/scRNA/dotplot_Luminal_A_C.png"), 
+       plot = last_plot(), 
+       width = 8, height = 5,
+       bg = "white")
+
+```
+# Save object 
+
+```{r save-object}
+
+SetAssayData(seurat, assay = "RNA", layer = "scale.data", new.data = NULL) 
+saveRDS(seurat, here("results/paper/scRNA/scRNA_VDR_Figures.rds"))
+
+# You could also save separately the count matrix, metadata, TSNE as csv
+# write.csv(file = here("results/tables/scRNA_VDR/matrix.csv"),
+#           GetAssayData(seurat, , assay = "RNA", layer = "count"))
+# write.csv(file = here("results/tables/scRNA_VDR/metadata.csv"),
+#           seurat@meta.data)
+# write.csv(file = here("results/tables/scRNA_VDR/TSNE.csv"),
+#           seurat@reductions$tsne)
+```
+
+
+# Markers 
+
+```{r, markers}
+seurat@active.assay <- "RNA"
+celltype_markers <- FindAllMarkers(seurat, 
+                                   only.pos = TRUE, 
+                                   min.pct = 0.1,
+                                   logfc.threshold = 0.25)
+
+```
+
+```{r table-markers}
+dir.create(here("results/paper/scRNA/"))
+write.csv(celltype_markers, 
+          file = here("results/paper/scRNA/celltype_markers_Luminal_A_C.csv"))
+```
+
+# DEG
+
+```{r deg}
+seurat@active.assay <- "RNA"
+
+celltype <- as.list(Idents(seurat) %>% levels())
+names(celltype) <- Idents(seurat) %>% levels()
+
+DEG <- lapply(celltype, function(x) {
+  table <- FindMarkers(seurat, 
+                       ident.1 = "Vdr",
+                       ident.2 = "Pten",
+                       group.by = "orig.ident",
+                       subset.ident = x, 
+                       min.pct = 0.1,
+                       logfc.threshold = 0.25
+                       )
+  return(table)
+})
+# If already calculated:
+DEG <-  lapply(celltype, function(x) {
+  table <- read.csv(file = here(glue("results/paper/scRNA/deg/", gsub('\\W', '_', x),".csv"))) %>%
+    column_to_rownames("X")
+  return(table)
+})
+
+# Merge significative deg for all cell type in df
+df <- data.frame()
+for (cell in celltype){
+  deg_sign <- DEG[[cell]] %>% 
+    filter(p_val < 0.05) %>%
+    arrange(p_val) %>% 
+    select(p_val)
+  this.df <- data.frame(gene = rownames(deg_sign), 
+                        p_val_adj = deg_sign$p_val, 
+                        cell = cell)
+  df <- rbind(df, this.df)
+}
+
+# Select unique deg (shared by less than 5 different cells)
+unique_deg <- df %>% group_by(gene) %>%
+  count(gene) %>% 
+  filter(n < 5) %>% 
+  pull(gene)
+
+DEG_unique <- list()
+for (cell in celltype){
+  DEG_unique[[cell]] <- DEG[[cell]][intersect(rownames(DEG[[cell]]), unique_deg),] %>%
+    filter(p_val < 0.05)
+}
+
+library(EnhancedVolcano)
+EnhancedVolcano(DEG$`Luminal C` , x = "avg_log2FC", y = "p_val", lab = rownames(DEG$`Luminal C`))
+
+EnhancedVolcano(DEG_unique$`Luminal C` , x = "avg_log2FC", y = "p_val", lab = rownames(DEG_unique$`Luminal C`))
+```
+
+```{r table-deg_unique}
+dir.create(here("results/paper/scRNA/deg"))
+dir.create(here("results/paper/scRNA/deg_unique"))
+
+lapply(celltype, function(x) {
+  write.csv(DEG[[x]], 
+            file = here(glue("results/paper/scRNA/deg/", gsub('\\W', '_', x),".csv")))
+  return(table)
+})
+
+lapply(celltype, function(x) {
+  write.csv(DEG_unique[[x]], 
+            file = here(glue("results/paper/scRNA/deg_unique/", gsub('\\W', '_', x),".csv")))
+  return(table)
+})
+
+```
+
+```{r figure-deg_unique}
+
+df <- data.frame()
+for (cell in levels(Idents(seurat))){
+  table <- DEG_unique[[cell]] %>% filter(p_val < 0.05)
+  this.df <- c(sign = 'Negative',
+               count = -sum(table$avg_log2FC < 0), 
+               cell = cell)
+  df <- rbind(df, this.df)
+  
+  this.df <- c(sign = 'Positive',
+               count = sum(table$avg_log2FC > 0), 
+               cell = cell)
+  df <- rbind(df, this.df)
+}
+
+colnames(df) <- c("Sign", "Count", "CellType")
+df$Count <- as.numeric(df$Count)
+df$Sign <- factor(df$Sign, levels = c("Positive", "Negative"))
+df$CellType <-  factor(df$CellType, levels =  levels(Idents(seurat)))
+
+ggplot(df, aes(x = CellType, y = Count, fill = Sign)) +
+  geom_col(position=position_dodge()) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        panel.background = element_blank()) +
+  scale_fill_manual(values = c("Positive" = "#C3D1F1", "Negative" = "#f1e3c3"))
+
+# For Katya: 
+# If you want to make Luminal C more visible you can do something like this:
+df$Fill <- ifelse(df$CellType == "Luminal C",
+                  paste(df$Sign, df$CellType, sep = " - "), 
+                  paste(df$Sign))
+df$Fill <- factor(df$Fill, levels = c("Positive", "Negative", 
+                                     "Positive - Luminal C", "Negative - Luminal C"))
+
+ggplot(df, aes(x = CellType, y = Count, fill = Fill)) +
+  geom_col(position=position_dodge(), color = 'black') + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        panel.background = element_blank()) +
+  scale_fill_manual(values = c("Positive" = "#C3D1F1", "Negative" = "#f1e3c3", 
+                               "Positive - Luminal C" = "#6D90DD", "Negative - Luminal C" = "#ddbb6d"))
+
+
+ggsave(filename = here(glue("results/paper/scRNA/deg_barplot.png")), 
+       plot = last_plot(), 
+       width = 5, height = 3,
+       bg = "white")
+
+```
+
+# Pathway
+
+```{r}
+#| label: pathway
+
+directory <- here(glue("results/paper/scRNA/pathways/DEG_unique"))
+library(org.Mm.eg.db)
+
+for (x in celltype){
+  ### gseKEGG -----
+  
+  geneList <- DEG_unique[[x]] %>%
+    arrange(desc(avg_log2FC)) %>%
+    dplyr::select(avg_log2FC) %>%
+    tibble::rownames_to_column() %>%
+    tibble::deframe()
+  
+  map <- bitr(names(geneList), fromType = "SYMBOL",
+              toType = c("ENTREZID"),
+              OrgDb = org.Mm.eg.db)
+  rownames(map) <- map[,"SYMBOL"]
+  
+  names(geneList) <- map[names(geneList),]$ENTREZID
+  
+  res_gseKEGG <- gseKEGG(
+    geneList = geneList,
+    pvalueCutoff = 1,
+    organism = "mmu", 
+    keyType = "kegg"
+  )
+  file <- here(glue(directory, "/gseKEGG/" ,gsub('\\W', '_', x), ".tsv"))
+  write.csv(res_gseKEGG@result %>% as.data.frame(), file)
+  
+  ### enrichKEGG -----
+  
+  gene <- DEG_unique[[x]] %>%
+    filter(p_val < 0.05) %>%
+    rownames()
+  gene <- map[gene,]$ENTREZID
+  gene <- gene[!is.na(gene)]
+  
+  res_enrichKEGG <- enrichKEGG(
+    gene = gene,
+    organism = "mmu", 
+    pvalueCutoff = 1
+  )
+  file <- here(glue(directory, "/enrichKEGG/" ,gsub('\\W', '_', x), ".tsv"))
+  write.csv(res_enrichKEGG@result %>% as.data.frame(), file)
+  
+  
+  ### enrichKEGG pos -----
+  
+  gene <- DEG_unique[[x]] %>%
+    filter(p_val < 0.05 & avg_log2FC > 0) %>%
+    rownames()
+  gene <- map[gene,]$ENTREZID
+  gene <- gene[!is.na(gene)]
+  
+  res_enrichKEGG_pos <- enrichKEGG(
+    gene = gene,
+    organism = "mmu", 
+    pvalueCutoff = 1
+  )
+  file <- here(glue(directory, "/enrichKEGG_pos/" ,gsub('\\W', '_', x), ".tsv"))
+  write.csv(res_enrichKEGG_pos@result %>% as.data.frame(), file)
+  
+  
+  ### enrichKEGG neg -----
+  gene <- DEG_unique[[x]] %>%
+    filter(p_val < 0.05 & avg_log2FC < 0) %>%
+    rownames()
+  gene <- map[gene,]$ENTREZID
+  gene <- gene[!is.na(gene)]
+  
+  res_enrichKEGG_neg <- enrichKEGG(
+    gene = gene,
+    organism = "mmu", 
+    pvalueCutoff = 1
+  )
+  file <- here(glue(directory, "/enrichKEGG_neg/" ,gsub('\\W', '_', x), ".tsv"))
+  write.csv(res_enrichKEGG_neg@result %>% as.data.frame(), file)
+}
+
+
+```
+
+
+# `sessionInfo()`
+
+```{r}
+#| label: sessioninfo
+
+sessionInfo()
+```
