@@ -1,0 +1,364 @@
+---
+title: "RNA seq paper tables and figures"
+format: html
+
+---
+
+# Script for paper tables and figures
+
+```{r}
+#| label: libraries
+
+library(here)
+library(readxl)
+library(DESeq2)
+library(org.Mm.eg.db)
+library(EnhancedVolcano)
+library(glue)
+library(msigdbr)
+library(ComplexHeatmap)
+library(readr)
+library(tidyverse)
+library(clusterProfiler)
+library(DOSE)
+
+# DESeq 1.38.3
+
+dir.create(here("results/paper/RNAseq/"))
+```
+
+```{r}
+metadata <- data.frame(id=c("LWHR72", "LWHR73", "LWHR74",
+                            "LWHR67", "LWHR69", "LWHR70",
+                            "LWHR83", "LWHR84", "LWHR85",
+                            "LWHR75", "LWHR77", "LWHR78"),
+                       cond=c("VDR_1m", "VDR_1m", "VDR_1m",
+                              "PTEN_1m", "PTEN_1m", "PTEN_1m",
+                              "VDR_3m", "VDR_3m", "VDR_3m",
+                              "PTEN_3m", "PTEN_3m", "PTEN_3m"))
+
+tableF <- read.csv(here("data/S22180_alldata.tsv"),
+                   sep='\t')
+tableF <- tableF %>% select("Ensembl.Gene.ID",
+                  starts_with(metadata$id),
+                  "Median.of.transcripts.length" , "Gene.name",
+                  "Chromosome.name", "Start.gene.position",
+                  "End.gene.position", "Gene.biotype",
+                  "Description")
+
+write.table(tableF,here("data/S22180_alldata_for_paper.tsv"),
+              sep="\t", dec=",",
+              quote=F, row.names=F)
+
+data <- read.csv(here("data/S22180_alldata_for_paper.tsv"), 
+                   sep='\t', dec=",") %>%
+  tibble::column_to_rownames("Ensembl.Gene.ID")
+```
+
+# PTENVDR 1 vs PTEN 1 month analysis
+
+## DESeq
+
+```{r}
+#| label: deseq-V1P1
+
+metadata.P1.V1 <- metadata %>% dplyr::filter(cond %in% c("VDR_1m", "PTEN_1m"))
+
+count.P1.V1 <- data %>% 
+  select(paste0(metadata.P1.V1$id, "..raw."))
+
+
+dds <- DESeqDataSetFromMatrix(countData=count.P1.V1,colData=metadata.P1.V1,design=~cond)
+
+dds <- DESeq(dds, minReplicatesForReplace=Inf)
+
+res.V1.P1 <- results(dds, alpha=0.05, cooksCutoff=T, 
+                     independentFiltering=T, 
+                     contrast=c("cond","VDR_1m","PTEN_1m"))
+
+vsdata <- vst(dds, blind=T)
+vsdata <- rlog(dds, blind=T)
+
+x <- plotPCA(vsdata, intgroup=c("cond", "id"))
+pcaData <- plotPCA(vsdata, intgroup=c("cond", "id"), 
+                   returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+ggplot(pcaData, aes(PC1, PC2, color=cond, label = id)) + 
+  geom_point() + 
+  geom_text(vjust = 0, nudge_y = 0.5) + 
+  theme_minimal() + 
+  xlim(min(pcaData$PC1)-5, max(pcaData$PC1)+5) + 
+  ylim(min(pcaData$PC2)-5, max(pcaData$PC2)+5)
+
+NCBI_id <- mapIds(org.Mm.eg.db, rownames(res.V1.P1), 'SYMBOL', 'ENSEMBL')
+res.V1.P1 <- res.V1.P1 %>% 
+            as.data.frame() %>% 
+            tibble::rownames_to_column(var= "Gene_name")
+res.V1.P1$Gene_symbol <- NCBI_id[res.V1.P1$Gene_name]
+
+# Table EV1
+write_tsv(x = res.V1.P1, 
+          file = here("results/paper/RNAseq/res.V1.P1.tsv"))
+```
+
+# PTENVDR 3 vs PTEN 3 month analysis
+
+## DESeq
+
+```{r}
+#| label: deseq-V3P3
+
+metadata.P3.V3 <- metadata %>% dplyr::filter(cond %in% c("VDR_3m", "PTEN_3m"))
+
+count.P3.V3 <- data %>% 
+  select(paste0(metadata.P3.V3$id, "..raw."))
+
+dds <- DESeqDataSetFromMatrix(countData=count.P3.V3,colData=metadata.P3.V3,design=~cond)
+
+dds <- DESeq(dds, minReplicatesForReplace=Inf)
+
+res.V3.P3 <- results(dds,  alpha=0.05, cooksCutoff=T, independentFiltering=T, contrast=c("cond","VDR_3m","PTEN_3m"))
+
+vsdata <- vst(dds, blind=T)
+vsdata <- rlog(dds, blind=T)
+
+x <- plotPCA(vsdata, intgroup=c("cond", "id"))
+pcaData <- plotPCA(vsdata, intgroup=c("cond", "id"), 
+                   returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+ggplot(pcaData, aes(PC1, PC2, color=cond, label = id)) + 
+  geom_point() + 
+  geom_text(vjust = 0, nudge_y = 0.5) + 
+  theme_minimal() + 
+  xlim(min(pcaData$PC1)-5, max(pcaData$PC1)+5) + 
+  ylim(min(pcaData$PC2)-5, max(pcaData$PC2)+5)
+  
+
+NCBI_id <- mapIds(org.Mm.eg.db, rownames(res.V3.P3), 'SYMBOL', 'ENSEMBL')
+res.V3.P3 <- res.V3.P3 %>% 
+            as.data.frame() %>% 
+            tibble::rownames_to_column(var= "Gene_name")
+res.V3.P3$Gene_symbol <- NCBI_id[res.V3.P3$Gene_name]
+
+# Table EV6
+write_tsv(x = res.V3.P3, 
+          file = here("results/paper/RNAseq/res.V3.P3.tsv"))
+```
+
+# Pathways - V1 P1 
+
+Create ranked list of genes for GSEA analysis.
+
+```{r}
+#| label: pathways-list
+
+test_up <- res.V1.P1 %>% 
+  filter(pvalue < 0.05 & 
+         abs(as.numeric(log2FoldChange)) > 0.3)
+
+NCBI_id <- mapIds(org.Mm.eg.db, test_up$Gene_name, 'ENTREZID', 'ENSEMBL')
+test_up <- test_up %>% 
+  add_column(NCBI=NCBI_id, .before  = 'Gene_name') %>% 
+  distinct(NCBI, .keep_all = T) %>% # If a NCBI ID is not distinct, this keeps the first row of values
+  drop_na(NCBI)
+
+# Create a vector of the FC 
+file <- test_up$'log2FoldChange'
+# Name vector with ENTREZ ids
+names(file) <- test_up$NCBI
+
+# sort the list in decreasing order (required for clusterProfiler)
+file_h <- sort(file, decreasing = TRUE)
+```
+
+## KEGG
+
+```{r}
+#| label: kegg
+
+name <- "res.V1.P1"
+
+gse <- gseKEGG(
+  geneList = file_h,
+  organism = "mmu",
+  keyType = "kegg",
+  exponent = 0,
+  minGSSize = 10,
+  maxGSSize = 500,
+  eps = 0,
+  pvalueCutoff = 0.1,
+  pAdjustMethod = "BH",
+  by = "fgsea",
+  nPermSimple = 10000) 
+
+gse <- setReadable(gse, org.Mm.eg.db, keyType = "ENTREZID")
+
+if (dim(gse)[1]!=0) {
+ gse@result$Path='KEGG'
+ gse@result$orig=name  
+}
+
+# Table EV2
+write.csv(gse@result, 
+          file=here(glue("results/paper/RNAseq/{name}_KEGG.csv")), 
+          row.names=T) 
+```
+
+# Pathways - V3 P3 
+
+Create ranked list of genes for GSEA analysis.
+
+```{r}
+#| label: pathways-list2
+
+test_up <- res.V3.P3 %>% 
+  filter(pvalue < 0.05 & 
+         abs(as.numeric(log2FoldChange)) > 0.3)
+         
+
+NCBI_id <- mapIds(org.Mm.eg.db, test_up$Gene_name, 'ENTREZID', 'ENSEMBL')
+test_up <- test_up %>% 
+  add_column(NCBI=NCBI_id, .before  = 'Gene_name') %>% 
+  distinct(NCBI, .keep_all = T) %>% # If a NCBI ID is not distinct, this keeps the first row of values
+  drop_na(NCBI)
+
+# Create a vector of the FC 
+file <- test_up$'log2FoldChange'
+# Name vector with ENTREZ ids
+names(file) <- test_up$NCBI
+
+# sort the list in decreasing order (required for clusterProfiler)
+file_h <- sort(file, decreasing = TRUE)
+```
+
+## KEGG
+
+```{r}
+#| label: kegg
+
+name <- "res.V3.P3"
+
+gse <- gseKEGG(
+  geneList = file_h,
+  organism = "mmu",
+  keyType = "kegg",
+  exponent = 0,
+  minGSSize = 10,
+  maxGSSize = 500,
+  eps = 0,
+  pvalueCutoff = 0.1,
+  pAdjustMethod = "BH",
+  by = "fgsea",
+  nPermSimple = 10000) 
+
+gse <- setReadable(gse, org.Mm.eg.db, keyType = "ENTREZID")
+
+if (dim(gse)[1]!=0) {
+ gse@result$Path='KEGG'
+ gse@result$orig=name  
+}
+
+# Table EV8
+write.csv(gse@result, 
+          file=here(glue("results/paper/RNAseq/{name}_KEGG.csv")), 
+          row.names=T) 
+```
+
+
+# Heatmap
+```{r}
+#| label: goi
+
+goi_V1.P1 <- res.V1.P1 %>% filter(pvalue < 0.05) %>% pull(Gene_name)
+
+goi_V3.P3 <- res.V3.P3 %>% filter(pvalue < 0.05) %>% pull(Gene_name)
+
+Heatmap_data <- data %>% 
+  select(ends_with("median.of.transcripts.length.in.kb."))
+
+Heatmap_V1.P1 <- Heatmap_data[goi_V1.P1, ] %>% 
+  select(starts_with(metadata.P1.V1$id))
+Heatmap_V3.P3 <- Heatmap_data[goi_V3.P3, ] %>% 
+  select(starts_with(metadata.P3.V3$id))
+
+```
+
+```{r}
+#| label: heatmapV1P1
+
+map_V1.P1=t(scale(t(Heatmap_V1.P1)))
+col_fun <- c("navyblue", "cornflowerblue", "grey90", "tan4", "orangered4") 
+
+column_ha = HeatmapAnnotation(cond = metadata.P1.V1$cond,
+    simple_anno_size = unit(0.2, "cm"))
+
+ht <- Heatmap(map_V1.P1, 
+              show_row_dend = F, 
+              col=col_fun,show_column_dend = F, 
+              column_order = colnames(map_V1.P1), 
+              name = 'normalized reads', 
+              cluster_row_slices = T, 
+              row_dend_reorder = T, 
+              cluster_rows = T, 
+              row_names_gp = gpar(fontsize = 0), 
+              column_names_side = "top", 
+              column_names_gp =gpar(fontsize = 0), 
+              column_names_rot = 0, 
+              column_names_centered = T,
+              top_annotation = column_ha, 
+              heatmap_legend_param = list(legend_direction = "vertical",legend_height = unit(2, "cm"),
+                                          title_gp=gpar(fontsize = 8), labels_gp=gpar(fontsize = 8),
+                                          title_position="leftcenter-rot", grid_width = unit(0.2, "cm")),
+              width = unit(5, "cm"), height=unit(2, 'cm'), 
+              use_raster = T)
+
+tiff(here("results/paper/RNAseq/Heatmap_P1V1.tiff"), width = 5, height = 5, res = 300, units = "in")
+
+draw(ht)
+dev.off()
+```
+
+```{r}
+#| label: heatmapV3P3
+
+map_V3.P3=t(scale(t(Heatmap_V3.P3)))
+col_fun <- c("navyblue", "cornflowerblue", "grey90", "tan4", "orangered4") 
+
+column_ha = HeatmapAnnotation(cond = metadata.P3.V3$cond,
+    simple_anno_size = unit(0.2, "cm"))
+
+ht <- Heatmap(map_V3.P3, 
+              show_row_dend = F, 
+              col=col_fun,show_column_dend = F, 
+              column_order = colnames(map_V3.P3), 
+              name = 'normalized reads',
+              cluster_row_slices = T, 
+              row_dend_reorder = T, 
+              cluster_rows = T, 
+              row_names_gp = gpar(fontsize = 0), 
+              column_names_side = "top", 
+              column_names_gp =gpar(fontsize = 0), 
+              column_names_rot = 0, 
+              column_names_centered = T,
+              top_annotation = column_ha, 
+              heatmap_legend_param = list(legend_direction = "vertical",legend_height = unit(2, "cm"),
+                                          title_gp=gpar(fontsize = 8), labels_gp=gpar(fontsize = 8),
+                                          title_position="leftcenter-rot", grid_width = unit(0.2, "cm")),
+              width = unit(5, "cm"),height=unit(4.3, 'cm'), 
+              use_raster = T)
+
+tiff(here("results/paper/RNAseq/Heatmap_P3V3.tiff"), width = 5, height = 5, res = 300, units = "in")
+
+draw(ht)
+dev.off()
+```
+
+# `sessionInfo()`
+
+```{r}
+#| label: sessioninfo
+
+sessionInfo()
+```
